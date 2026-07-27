@@ -1,14 +1,18 @@
 const http = require('http');
-const https = require('https');
 const net = require('net');
 const url = require('url');
 
-// Your proxy port
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 
 const server = http.createServer((req, res) => {
-  // Parse the target URL
+  // Make sure we have a full URL
   const targetUrl = url.parse(req.url);
+  
+  if (!targetUrl.hostname) {
+    res.writeHead(400);
+    res.end('Bad Request');
+    return;
+  }
 
   console.log(`Proxying HTTP: ${req.url}`);
 
@@ -19,13 +23,11 @@ const server = http.createServer((req, res) => {
     method: req.method,
     headers: {
       ...req.headers,
-      // Hide original IP
-      'X-Forwarded-For': '',
       host: targetUrl.hostname,
+      'X-Forwarded-For': '',
     },
   };
 
-  // Forward the request
   const proxyReq = http.request(options, (proxyRes) => {
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     proxyRes.pipe(res, { end: true });
@@ -36,17 +38,16 @@ const server = http.createServer((req, res) => {
   proxyReq.on('error', (err) => {
     console.error('Proxy error:', err.message);
     res.writeHead(500);
-    res.end('Proxy error');
+    res.end('Proxy error: ' + err.message);
   });
 });
 
-// Handle HTTPS tunneling (CONNECT method)
+// Handle HTTPS
 server.on('connect', (req, clientSocket, head) => {
   console.log(`Proxying HTTPS: ${req.url}`);
 
-  const { port, hostname } = new URL(`https://${req.url}`);
+  const [hostname, port] = req.url.split(':');
 
-  // Connect to the target server
   const serverSocket = net.connect(port || 443, hostname, () => {
     clientSocket.write(
       'HTTP/1.1 200 Connection Established\r\n' +
@@ -64,7 +65,6 @@ server.on('connect', (req, clientSocket, head) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Proxy server running on port ${PORT}`);
-  console.log(`Set your browser proxy to: 127.0.0.1:${PORT}`);
 });
