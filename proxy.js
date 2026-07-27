@@ -1,6 +1,7 @@
 const http = require('http');
 const net = require('net');
 const url = require('url');
+const { spawn } = require('child_process');
 
 const PORT = process.env.PORT || 8080;
 
@@ -30,6 +31,34 @@ function cleanHeaders(headers) {
   return cleaned;
 }
 
+// Start Cloudflare tunnel
+function startCloudflare() {
+  const tunnel = spawn('cloudflared', [
+    'tunnel',
+    '--url',
+    `http://localhost:${PORT}`,
+    '--no-autoupdate',
+  ]);
+
+  tunnel.stdout.on('data', (data) => {
+    console.log(`Cloudflare: ${data}`);
+  });
+
+  tunnel.stderr.on('data', (data) => {
+    const output = data.toString();
+    // Extract the Cloudflare URL
+    const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+    if (match) {
+      console.log(`\n🌍 Your Cloudflare URL: ${match[0]}`);
+      console.log(`Set your browser proxy to this URL\n`);
+    }
+  });
+
+  tunnel.on('error', (err) => {
+    console.error('Cloudflare tunnel error:', err.message);
+  });
+}
+
 const server = http.createServer((req, res) => {
   const targetUrl = url.parse(req.url);
 
@@ -46,7 +75,6 @@ const server = http.createServer((req, res) => {
     port: targetUrl.port || 80,
     path: targetUrl.path,
     method: req.method,
-    // Clean headers to hide proxy
     headers: {
       ...cleanHeaders(req.headers),
       host: targetUrl.hostname,
@@ -57,7 +85,6 @@ const server = http.createServer((req, res) => {
   };
 
   const proxyReq = http.request(options, (proxyRes) => {
-    // Clean response headers too
     const cleanedResHeaders = cleanHeaders(proxyRes.headers);
     res.writeHead(proxyRes.statusCode, cleanedResHeaders);
     proxyRes.pipe(res, { end: true });
@@ -81,7 +108,7 @@ server.on('connect', (req, clientSocket, head) => {
   const serverSocket = net.connect(port || 443, hostname, () => {
     clientSocket.write(
       'HTTP/1.1 200 Connection Established\r\n' +
-      'Proxy-agent: \r\n' + // hide proxy agent name
+      'Proxy-agent: \r\n' +
       '\r\n'
     );
     serverSocket.write(head);
@@ -97,4 +124,5 @@ server.on('connect', (req, clientSocket, head) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Proxy server running on port ${PORT}`);
+  startCloudflare(); // 👈 starts Cloudflare tunnel after server is ready
 });
