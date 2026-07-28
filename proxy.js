@@ -33,24 +33,29 @@ function cleanHeaders(headers) {
 
 // Start Cloudflare tunnel
 function startCloudflare() {
-  const tunnel = spawn('cloudflared', [
+  // Use npx instead of direct spawn to fix permission issues
+  const tunnel = spawn('npx', [
+    '--yes',
+    'cloudflared',
     'tunnel',
     '--url',
     `http://localhost:${PORT}`,
     '--no-autoupdate',
-  ]);
+  ], {
+    env: { ...process.env, PATH: process.env.PATH },
+    shell: true
+  });
 
   tunnel.stdout.on('data', (data) => {
-    console.log(`Cloudflare: ${data}`);
+    console.log(`CF stdout: ${data}`);
   });
 
   tunnel.stderr.on('data', (data) => {
     const output = data.toString();
-    // Extract the Cloudflare URL
+    console.log(`CF: ${output}`);
     const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
     if (match) {
-      console.log(`\n🌍 Your Cloudflare URL: ${match[0]}`);
-      console.log(`Set your browser proxy to this URL\n`);
+      console.log(`\n🌍 Your Cloudflare URL: ${match[0]}\n`);
     }
   });
 
@@ -78,7 +83,6 @@ const server = http.createServer((req, res) => {
     headers: {
       ...cleanHeaders(req.headers),
       host: targetUrl.hostname,
-      // Spoof a real browser
       'user-agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     },
@@ -124,5 +128,5 @@ server.on('connect', (req, clientSocket, head) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Proxy server running on port ${PORT}`);
-  startCloudflare(); // 👈 starts Cloudflare tunnel after server is ready
+  startCloudflare();
 });
