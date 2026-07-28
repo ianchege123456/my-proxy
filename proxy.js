@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 8080;
+let cloudflareUrl = null; // store the tunnel URL when it's ready
 
 // Headers that reveal you're using a proxy
 const HOP_BY_HOP_HEADERS = [
@@ -64,7 +65,9 @@ function startCloudflare() {
       console.log(`CF: ${output}`);
       const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
       if (match) {
-        console.log(`\n🌍 Your Cloudflare URL: ${match[0]}\n`);
+        cloudflareUrl = match[0];
+        console.log(`\n🌍 Your Cloudflare URL: ${cloudflareUrl}\n`);
+        console.log(`📄 PAC file available at: http://localhost:${PORT}/pac\n`);
       }
     });
 
@@ -78,6 +81,25 @@ function startCloudflare() {
 }
 
 const server = http.createServer((req, res) => {
+
+  // Serve PAC file so Firefox uses Cloudflare URL as proxy
+  if (req.url === '/pac') {
+    const proxyHost = cloudflareUrl
+      ? cloudflareUrl.replace('https://', '')
+      : `localhost:${PORT}`;
+
+    const pacContent = `function FindProxyForURL(url, host) {
+  return "PROXY ${proxyHost}:80";
+}`;
+
+    res.writeHead(200, {
+      'Content-Type': 'application/x-ns-proxy-autoconfig',
+    });
+    res.end(pacContent);
+    console.log(`📄 PAC file served with proxy: ${proxyHost}`);
+    return;
+  }
+
   const targetUrl = url.parse(req.url);
 
   if (!targetUrl.hostname) {
