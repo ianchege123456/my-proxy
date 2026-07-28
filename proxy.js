@@ -2,6 +2,8 @@ const http = require('http');
 const net = require('net');
 const url = require('url');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const PORT = process.env.PORT || 8080;
 
@@ -33,35 +35,46 @@ function cleanHeaders(headers) {
 
 // Start Cloudflare tunnel
 function startCloudflare() {
-  // Use npx instead of direct spawn to fix permission issues
-  const tunnel = spawn('npx', [
-    '--yes',
-    'cloudflared',
-    'tunnel',
-    '--url',
-    `http://localhost:${PORT}`,
-    '--no-autoupdate',
-  ], {
-    env: { ...process.env, PATH: process.env.PATH },
-    shell: true
-  });
+  try {
+    const binaryPath = path.join(
+      __dirname,
+      'node_modules',
+      'cloudflared',
+      'bin',
+      'cloudflared'
+    );
 
-  tunnel.stdout.on('data', (data) => {
-    console.log(`CF stdout: ${data}`);
-  });
+    // Make it executable
+    fs.chmodSync(binaryPath, '755');
+    console.log('✅ cloudflared permissions fixed');
 
-  tunnel.stderr.on('data', (data) => {
-    const output = data.toString();
-    console.log(`CF: ${output}`);
-    const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (match) {
-      console.log(`\n🌍 Your Cloudflare URL: ${match[0]}\n`);
-    }
-  });
+    const tunnel = spawn(binaryPath, [
+      'tunnel',
+      '--url',
+      `http://localhost:${PORT}`,
+      '--no-autoupdate',
+    ]);
 
-  tunnel.on('error', (err) => {
-    console.error('Cloudflare tunnel error:', err.message);
-  });
+    tunnel.stdout.on('data', (data) => {
+      console.log(`CF: ${data}`);
+    });
+
+    tunnel.stderr.on('data', (data) => {
+      const output = data.toString();
+      console.log(`CF: ${output}`);
+      const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (match) {
+        console.log(`\n🌍 Your Cloudflare URL: ${match[0]}\n`);
+      }
+    });
+
+    tunnel.on('error', (err) => {
+      console.error('Cloudflare tunnel error:', err.message);
+    });
+
+  } catch (err) {
+    console.error('Failed to start cloudflared:', err.message);
+  }
 }
 
 const server = http.createServer((req, res) => {
