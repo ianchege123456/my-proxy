@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "proxy.js",
   "scripts": {
-    "start": "apt-get install -y tor && tor --RunAsDaemon 1 && node proxy.js",
+    "start": "node proxy.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -1,18 +1,12 @@
 const http = require('http');
-const https = require('https');
 const net = require('net');
 const url = require('url');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const PORT = process.env.PORT || 8080;
 
-// Tor SOCKS5 agent — routes all traffic through Tor
-const torAgent = new SocksProxyAgent('socks5://127.0.0.1:9050');
-
-// Headers that reveal you're using a proxy
 const HOP_BY_HOP_HEADERS = [
   'proxy-connection',
   'proxy-authenticate',
@@ -38,7 +32,6 @@ function cleanHeaders(headers) {
   return cleaned;
 }
 
-// Start Cloudflare tunnel
 function startCloudflare() {
   try {
     const binaryPath = path.join(
@@ -97,8 +90,6 @@ const server = http.createServer((req, res) => {
     port: targetUrl.port || 80,
     path: targetUrl.path,
     method: req.method,
-    // 👇 Route through Tor
-    agent: torAgent,
     headers: {
       ...cleanHeaders(req.headers),
       host: targetUrl.hostname,
@@ -122,21 +113,12 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// Handle HTTPS tunneling through Tor
 server.on('connect', (req, clientSocket, head) => {
-  console.log(`Proxying HTTPS via Tor: ${req.url}`);
+  console.log(`Proxying HTTPS: ${req.url}`);
 
   const [hostname, port] = req.url.split(':');
 
-  // Connect through Tor SOCKS5
-  const torSocket = new net.Socket();
-  const socksAgent = new SocksProxyAgent('socks5://127.0.0.1:9050');
-
-  const serverSocket = net.connect({
-    host: hostname,
-    port: port || 443,
-    agent: socksAgent,
-  }, () => {
+  const serverSocket = net.connect(port || 443, hostname, () => {
     clientSocket.write(
       'HTTP/1.1 200 Connection Established\r\n' +
       'Proxy-agent: \r\n' +
@@ -148,7 +130,7 @@ server.on('connect', (req, clientSocket, head) => {
   });
 
   serverSocket.on('error', (err) => {
-    console.error('HTTPS Tor error:', err.message);
+    console.error('HTTPS error:', err.message);
     clientSocket.end();
   });
 });
