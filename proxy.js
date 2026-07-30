@@ -1,12 +1,16 @@
 const http = require('http');
+const https = require('https');
 const net = require('net');
 const url = require('url');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const PORT = process.env.PORT || 8080;
-let cloudflareUrl = null; // store the tunnel URL when it's ready
+
+// Tor SOCKS5 agent — routes all traffic through Tor
+const torAgent = new SocksProxyAgent('socks5://127.0.0.1:9050');
 
 // Headers that reveal you're using a proxy
 const HOP_BY_HOP_HEADERS = [
@@ -45,7 +49,6 @@ function startCloudflare() {
       'cloudflared'
     );
 
-    // Make it executable
     fs.chmodSync(binaryPath, '755');
     console.log('✅ cloudflared permissions fixed');
 
@@ -65,9 +68,7 @@ function startCloudflare() {
       console.log(`CF: ${output}`);
       const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
       if (match) {
-        cloudflareUrl = match[0];
-        console.log(`\n🌍 Your Cloudflare URL: ${cloudflareUrl}\n`);
-        console.log(`📄 PAC file available at: http://localhost:${PORT}/pac\n`);
+        console.log(`\n🌍 Your Cloudflare URL: ${match[0]}\n`);
       }
     });
 
@@ -81,25 +82,6 @@ function startCloudflare() {
 }
 
 const server = http.createServer((req, res) => {
-
-  // Serve PAC file so Firefox uses Cloudflare URL as proxy
-  if (req.url === '/pac') {
-    const proxyHost = cloudflareUrl
-      ? cloudflareUrl.replace('https://', '')
-      : `localhost:${PORT}`;
-
-    const pacContent = `function FindProxyForURL(url, host) {
-  return "PROXY ${proxyHost}:80";
-}`;
-
-    res.writeHead(200, {
-      'Content-Type': 'application/x-ns-proxy-autoconfig',
-    });
-    res.end(pacContent);
-    console.log(`📄 PAC file served with proxy: ${proxyHost}`);
-    return;
-  }
-
   const targetUrl = url.parse(req.url);
 
   if (!targetUrl.hostname) {
@@ -115,6 +97,8 @@ const server = http.createServer((req, res) => {
     port: targetUrl.port || 80,
     path: targetUrl.path,
     method: req.method,
+    // 👇 Route through Tor
+    agent: torAgent,
     headers: {
       ...cleanHeaders(req.headers),
       host: targetUrl.hostname,
@@ -138,13 +122,21 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// Handle HTTPS tunneling
+// Handle HTTPS tunneling through Tor
 server.on('connect', (req, clientSocket, head) => {
-  console.log(`Proxying HTTPS: ${req.url}`);
+  console.log(`Proxying HTTPS via Tor: ${req.url}`);
 
   const [hostname, port] = req.url.split(':');
 
-  const serverSocket = net.connect(port || 443, hostname, () => {
+  // Connect through Tor SOCKS5
+  const torSocket = new net.Socket();
+  const socksAgent = new SocksProxyAgent('socks5://127.0.0.1:9050');
+
+  const serverSocket = net.connect({
+    host: hostname,
+    port: port || 443,
+    agent: socksAgent,
+  }, () => {
     clientSocket.write(
       'HTTP/1.1 200 Connection Established\r\n' +
       'Proxy-agent: \r\n' +
@@ -156,7 +148,7 @@ server.on('connect', (req, clientSocket, head) => {
   });
 
   serverSocket.on('error', (err) => {
-    console.error('HTTPS error:', err.message);
+    console.error('HTTPS Tor error:', err.message);
     clientSocket.end();
   });
 });
